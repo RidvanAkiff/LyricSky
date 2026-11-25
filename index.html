@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LyricSky — Live Lyrics Desktop</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-theme="overcast">
+
+  <!-- Layer 0: Seamless Dual-Deck Crossfade Cloud Video Background -->
+  <div id="bg-fallback" aria-hidden="true"></div>
+  <video class="bg-video" id="bg-video-a" src="clouds.mp4" muted playsinline preload="auto"></video>
+  <video class="bg-video" id="bg-video-b" src="clouds.mp4" muted playsinline preload="auto"></video>
+
+  <!-- Layer 1: Cinema Vignette, Ambient Aura & Subtle Film Grain -->
+  <div id="atmosphere-vignette" aria-hidden="true"></div>
+  <div id="atmosphere-aura" aria-hidden="true"></div>
+  <div id="atmosphere-grain" aria-hidden="true"></div>
+
+  <!-- Layer 2: Interactive Constellation Lyrics & Ambient Stardust Canvas -->
+  <canvas id="constellation" aria-hidden="true"></canvas>
+
+  <!-- Layer 3: Top Lockscreen Clock -->
+  <header id="clock-wrap">
+    <div id="date"></div>
+    <div id="time">
+      <span id="time-main">00:00</span><span id="time-sec"></span>
+    </div>
+  </header>
+
+  <!-- Layer 4: Bottom Interactive Stack (Settings + Whisper + Notice + Dock) -->
+  <div id="bottom-stack">
+
+    <!-- Toast Notice -->
+    <div id="notice" role="status" aria-live="polite"></div>
+
+    <!-- Expandable Glass Settings Popover -->
+    <section id="settings-panel" aria-label="Appearance & Settings" hidden>
+      <div class="settings-header">
+        <div class="settings-title-group">
+          <span class="settings-title" data-i18n="settingsTitle">Appearance &amp; Settings</span>
+          <span class="settings-sub" id="settings-conn-label">Waiting for LyricSky bridge...</span>
+        </div>
+        <button class="icon-btn sm" id="btn-close-settings" data-i18n-title="close" title="Close" aria-label="Close settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="settings-body">
+        <!-- Language & Media Source Row -->
+        <div class="select-two-col">
+          <div class="setting-block">
+            <div class="setting-label-row">
+              <span class="setting-label" data-i18n="languageLabel">Language</span>
+            </div>
+            <select id="lang-select" class="glass-select" aria-label="Language">
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div class="setting-block">
+            <div class="setting-label-row">
+              <span class="setting-label" data-i18n="sourceLabel">Media Source</span>
+            </div>
+            <select id="session-select" class="glass-select" aria-label="Media Source">
+              <option value="auto" data-i18n="sourceAuto">Automatic (Spotify priority)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Theme Presets -->
+        <div class="setting-block">
+          <div class="setting-label-row">
+            <span class="setting-label" data-i18n="themeLabel">Atmosphere Theme</span>
+          </div>
+          <div class="theme-grid" id="theme-grid">
+            <button class="theme-chip active" data-theme-val="overcast">
+              <span class="swatch swatch-overcast"></span>
+              <span data-i18n="themeOvercast">Overcast</span>
+            </button>
+            <button class="theme-chip" data-theme-val="midnight">
+              <span class="swatch swatch-midnight"></span>
+              <span data-i18n="themeMidnight">Midnight</span>
+            </button>
+            <button class="theme-chip" data-theme-val="ambient">
+              <span class="swatch swatch-ambient"></span>
+              <span data-i18n="themeAmbient">Ambient</span>
+            </button>
+            <button class="theme-chip" data-theme-val="dusk">
+              <span class="swatch swatch-dusk"></span>
+              <span data-i18n="themeDusk">Dusk</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Lyric Sync Offset -->
+        <div class="setting-block">
+          <div class="setting-label-row">
+            <span class="setting-label" data-i18n="syncLabel">Lyric Sync Offset</span>
+            <button class="text-action" id="btn-refetch" data-i18n="refetchLyrics">Search Again</button>
+          </div>
+          <div class="sync-row">
+            <button class="pill-btn" data-offset="-0.5">-0.5s</button>
+            <button class="pill-btn" data-offset="-0.1">-0.1s</button>
+            <button class="pill-btn offset-readout" id="btn-offset-reset" data-i18n-title="resetOffset" title="Reset">0.0s</button>
+            <button class="pill-btn" data-offset="0.1">+0.1s</button>
+            <button class="pill-btn" data-offset="0.5">+0.5s</button>
+          </div>
+        </div>
+
+        <!-- Reticle Style -->
+        <div class="setting-block">
+          <div class="setting-label-row">
+            <span class="setting-label" data-i18n="reticleLabel">Star Reticle</span>
+          </div>
+          <div class="segmented" id="reticle-group">
+            <button class="seg-btn active" data-reticle="crosshair" data-i18n="reticleCrosshair">Crosshair</button>
+            <button class="seg-btn" data-reticle="orbital" data-i18n="reticleOrbital">Orbital</button>
+            <button class="seg-btn" data-reticle="starburst" data-i18n="reticleStarburst">Starburst</button>
+          </div>
+        </div>
+
+        <!-- Toggles Grid -->
+        <div class="toggle-grid">
+          <label class="toggle-item">
+            <span data-i18n="optSpotifyCard">Spotify Card</span>
+            <input type="checkbox" id="opt-spotifycard" checked />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-item">
+            <span data-i18n="optSideFeed">Lyrics Stream</span>
+            <input type="checkbox" id="opt-sidefeed" checked />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-item">
+            <span data-i18n="optWhisper">Center Line</span>
+            <input type="checkbox" id="opt-whisper" />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-item">
+            <span data-i18n="optDust">Stardust</span>
+            <input type="checkbox" id="opt-dust" checked />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-item">
+            <span data-i18n="optClock">Show Clock</span>
+            <input type="checkbox" id="opt-clock" checked />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-item">
+            <span data-i18n="optSeconds">Seconds</span>
+            <input type="checkbox" id="opt-seconds" />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-item">
+            <span data-i18n="optAutofade">Auto-Fade Dock</span>
+            <input type="checkbox" id="opt-autofade" />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-item">
+            <span data-i18n="optCompact">Compact Dock</span>
+            <input type="checkbox" id="opt-compact" />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="toggle-item">
+            <span data-i18n="optDesktopIcons">Desktop Icons</span>
+            <input type="checkbox" id="opt-icons" checked />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <!-- Sliders -->
+        <div class="slider-group">
+          <div class="slider-row">
+            <span class="setting-label" data-i18n="sliderLife">Word Lifetime</span>
+            <span class="slider-val" id="val-life">13s</span>
+            <input type="range" id="opt-life" min="6" max="24" step="1" value="13" />
+          </div>
+          <div class="slider-row">
+            <span class="setting-label" data-i18n="sliderBrightness">Background Brightness</span>
+            <span class="slider-val" id="val-brightness">72%</span>
+            <input type="range" id="opt-brightness" min="0.35" max="1.15" step="0.02" value="0.72" />
+          </div>
+          <div class="slider-row">
+            <span class="setting-label" data-i18n="sliderGrayscale">Grayscale</span>
+            <span class="slider-val" id="val-grayscale">100%</span>
+            <input type="range" id="opt-grayscale" min="0" max="100" step="5" value="100" />
+          </div>
+        </div>
+
+        <!-- Demo Preview CTA -->
+        <div class="settings-footer">
+          <button class="demo-cta" id="btn-demo-panel">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3l1.9 5.3L19 10.2l-5.1 1.9L12 17.4l-1.9-5.3L5 10.2l5.1-1.9L12 3z"/>
+              <path d="M19 3v3M20.5 4.5h-3M5 17v3M6.5 18.5h-3"/>
+            </svg>
+            <span id="demo-cta-label" data-i18n="demoStart">Start Animation Preview</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Subtle Full-Line Lyric Whisper -->
+    <div id="lyric-whisper" dir="auto" aria-live="off"></div>
+
+    <!-- Floating Glassmorphic Media Dock -->
+    <main id="player-dock" aria-label="Media Player">
+      <div class="dock-header">
+        <!-- Album Artwork -->
+        <div class="cover-wrap" id="cover-wrap">
+          <img id="cover-img" alt="" hidden />
+          <div class="cover-placeholder" id="cover-placeholder" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9" opacity="0.45"/>
+              <circle cx="12" cy="12" r="2.5"/>
+              <path d="M12 3a9 9 0 0 1 9 9" opacity="0.8"/>
+            </svg>
+          </div>
+          <div class="eq-bars" id="eq-bars" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <!-- Track Title, Artist & Live Status -->
+        <div class="track-meta">
+          <div class="track-title-row">
+            <div id="track-title" dir="auto">Waiting for connection...</div>
+          </div>
+          <div id="track-artist" dir="auto">Syncs automatically when a song starts</div>
+          <div class="status-row">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status-text">Bridge offline</span>
+          </div>
+        </div>
+
+        <!-- Quick Dock Actions -->
+        <div class="dock-actions">
+          <button class="offset-badge" id="offset-badge" data-i18n-title="tooltipOffset" title="Lyric sync offset" hidden>0.0s</button>
+          <button class="icon-btn" id="btn-demo-quick" title="Preview" aria-label="Preview" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3l1.9 5.3L19 10.2l-5.1 1.9L12 17.4l-1.9-5.3L5 10.2l5.1-1.9L12 3z"/>
+            </svg>
+          </button>
+          <button class="icon-btn" id="btn-settings" data-i18n-title="tooltipSettings" title="Appearance & Settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="4" y1="7" x2="20" y2="7"/>
+              <circle cx="9" cy="7" r="2"/>
+              <line x1="4" y1="17" x2="20" y2="17"/>
+              <circle cx="15" cy="17" r="2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Interactive Progress Scrubber -->
+      <div class="scrubber-section">
+        <div id="progress-hit" role="slider" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+          <div id="scrub-tooltip">00:00</div>
+          <div id="progress-bg">
+            <div id="progress-fill"></div>
+          </div>
+          <div id="progress-thumb"></div>
+        </div>
+        <div class="time-row">
+          <span id="time-elapsed">00:00</span>
+          <button id="time-total" class="time-toggle" data-i18n-title="tooltipToggleTime" title="Toggle total / remaining time">00:00</button>
+        </div>
+      </div>
+
+      <!-- Media Transport Controls -->
+      <div id="media-controls">
+        <button class="ctrl-btn step" id="btn-back10" data-i18n-title="tooltipBack10" title="Back 10 seconds">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+          <span>10</span>
+        </button>
+
+        <button class="ctrl-btn" id="btn-prev" data-i18n-title="tooltipPrev" title="Previous track / Restart">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <rect x="4" y="5" width="2.4" height="14" rx="1.2"/>
+            <path d="M18.8 5.8a1.1 1.1 0 0 1 1.7.92v10.56a1.1 1.1 0 0 1-1.7.92l-8.4-5.28a1.1 1.1 0 0 1 0-1.84l8.4-5.28z"/>
+          </svg>
+        </button>
+
+        <button class="ctrl-btn primary" id="btn-toggle" data-i18n-title="tooltipPlayPause" title="Play / Pause" aria-label="Play or pause">
+          <svg id="icon-play" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7.5 5.2a1.2 1.2 0 0 1 1.82-1.03l11.2 6.8a1.2 1.2 0 0 1 0 2.06l-11.2 6.8A1.2 1.2 0 0 1 7.5 18.8V5.2z"/>
+          </svg>
+          <svg id="icon-pause" viewBox="0 0 24 24" fill="currentColor" hidden>
+            <rect x="6" y="4.5" width="4.2" height="15" rx="1.6"/>
+            <rect x="13.8" y="4.5" width="4.2" height="15" rx="1.6"/>
+          </svg>
+        </button>
+
+        <button class="ctrl-btn" id="btn-next" data-i18n-title="tooltipNext" title="Next track">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <rect x="17.6" y="5" width="2.4" height="14" rx="1.2"/>
+            <path d="M5.2 5.8a1.1 1.1 0 0 0-1.7.92v10.56a1.1 1.1 0 0 0 1.7.92l8.4-5.28a1.1 1.1 0 0 0 0-1.84L5.2 5.8z"/>
+          </svg>
+        </button>
+
+        <button class="ctrl-btn step" id="btn-fwd10" data-i18n-title="tooltipFwd10" title="Forward 10 seconds">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/>
+            <path d="M21 3v5h-5"/>
+          </svg>
+          <span>10</span>
+        </button>
+      </div>
+
+      <!-- Hairline bottom progress shown in compact mode -->
+      <div class="compact-progress" aria-hidden="true">
+        <div id="compact-progress-fill"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Layer 4A: Bottom-Left Translucent Spotify Now-Playing Screen -->
+  <aside id="spotify-stage" class="is-idle" aria-label="Spotify Now Playing">
+    <div class="sp-ambient-bg" id="sp-ambient-bg" aria-hidden="true"></div>
+    <div class="sp-top-bar">
+      <div class="sp-brand">
+        <svg class="sp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.623.623 0 1 1-.277-1.215c3.809-.87 7.076-.496 9.713 1.115a.623.623 0 0 1 .206.857zm1.223-2.722a.78.78 0 0 1-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 0 1-.973-.519.781.781 0 0 1 .52-.972c3.632-1.102 8.147-.568 11.234 1.328a.78.78 0 0 1 .256 1.072zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.937.937 0 1 1-.543-1.794c3.532-1.072 9.404-.865 13.115 1.338a.937.937 0 0 1-.955 1.613z"/>
+        </svg>
+        <span class="sp-brand-text" id="sp-brand-text">Spotify</span>
+      </div>
+      <div class="sp-live-pill">
+        <span class="sp-live-bars" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </span>
+        <span id="sp-state-label">Ready</span>
+      </div>
+    </div>
+
+    <div class="sp-art-frame">
+      <img id="sp-cover-img" alt="" hidden />
+      <div class="sp-art-placeholder" id="sp-art-placeholder" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.623.623 0 1 1-.277-1.215c3.809-.87 7.076-.496 9.713 1.115a.623.623 0 0 1 .206.857zm1.223-2.722a.78.78 0 0 1-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 0 1-.973-.519.781.781 0 0 1 .52-.972c3.632-1.102 8.147-.568 11.234 1.328a.78.78 0 0 1 .256 1.072zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71a.937.937 0 1 1-.543-1.794c3.532-1.072 9.404-.865 13.115 1.338a.937.937 0 0 1-.955 1.613z"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="sp-info">
+      <div class="sp-title-row">
+        <div class="sp-title" id="sp-title" dir="auto">Waiting for Spotify</div>
+        <span class="sp-check" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2a10 10 0 1 0 10 10A10.011 10.011 0 0 0 12 2zm4.71 7.71-5.4 5.4a1 1 0 0 1-1.42 0l-2.6-2.6a1 1 0 1 1 1.42-1.42l1.89 1.9 4.69-4.7a1 1 0 1 1 1.42 1.42z"/>
+          </svg>
+        </span>
+      </div>
+      <div class="sp-artist" id="sp-artist" dir="auto">Your current track will appear here</div>
+      <div class="sp-album" id="sp-album" dir="auto" hidden></div>
+    </div>
+
+    <div class="sp-progress-wrap">
+      <div class="sp-progress-track">
+        <div class="sp-progress-fill" id="sp-progress-fill"></div>
+      </div>
+      <div class="sp-times">
+        <span id="sp-time-cur">0:00</span>
+        <span id="sp-time-dur">0:00</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Layer 4B: Bottom-Right Spotify-Style Scrolling Sentence Feed -->
+  <aside id="lyric-feed" aria-label="Lyrics Stream">
+    <div id="lyric-feed-list"></div>
+  </aside>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
