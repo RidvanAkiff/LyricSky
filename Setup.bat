@@ -35,6 +35,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
+".venv\Scripts\python.exe" -c "import aiohttp, PIL, win32gui, winrt.windows.media.control" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Dependency verification failed. Please check your internet connection and re-run Setup.bat.
+    pause
+    exit /b 1
+)
+echo ok > ".venv\.ready"
+
 echo [3/3] Opening Language ^& Startup Setup Wizard...
 ".venv\Scripts\python.exe" setup_wizard.py
 exit /b 0

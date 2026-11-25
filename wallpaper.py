@@ -57,15 +57,22 @@ DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 EDGE_PROFILE_DIR = DATA_DIR / "edge_lyricsky_profile"
 TRAY_ICON_PATH = DATA_DIR / "lyricsky_tray.ico"
+LOG_FILE = DATA_DIR / "lyricsky.log"
 
 WALLPAPER_URL = f"http://{bridge.HOST}:{bridge.PORT}/?mode=wallpaper"
 CONTROL_URL = f"http://{bridge.HOST}:{bridge.PORT}/"
 STATUS_URL = f"http://{bridge.HOST}:{bridge.PORT}/api/status"
 
+_handlers: list[logging.Handler] = [logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8")]
+if sys.stdout is not None:
+    _handlers.append(logging.StreamHandler(sys.stdout))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
+    handlers=_handlers,
+    force=True,
 )
 log = logging.getLogger("lyricsky.wallpaper")
 
@@ -647,15 +654,60 @@ class LyricSkyDesktopApp:
     def _broadcast(self, payload: dict[str, Any]) -> None:
         self.bridge_thread.bridge_svc.broadcast_threadsafe(payload)
 
+    def _add_tray_icon(self, show_balloon: bool = False) -> None:
+        if not self.tray_hwnd or not self.hicon:
+            return
+        flags = win32gui.NIF_ICON | win32gui.NIF_MESSAGE | win32gui.NIF_TIP
+        tip = self._t("trayTooltip", "LyricSky")[:127]
+        for _ in range(4):
+            try:
+                win32gui.Shell_NotifyIcon(
+                    win32gui.NIM_ADD,
+                    (self.tray_hwnd, 0, flags, WM_TRAYICON, self.hicon, tip),
+                )
+                self._tray_added = True
+                break
+            except Exception as exc:
+                log.debug("Shell_NotifyIcon NIM_ADD retry: %s", exc)
+                time.sleep(0.25)
+
+        if self._tray_added and show_balloon:
+            try:
+                win32gui.Shell_NotifyIcon(
+                    win32gui.NIM_MODIFY,
+                    (
+                        self.tray_hwnd,
+                        0,
+                        win32gui.NIF_INFO,
+                        WM_TRAYICON,
+                        self.hicon,
+                        tip,
+                        self._t("trayStartedMsg", "LyricSky is running.")[:255],
+                        3200,
+                        self._t("trayStartedTitle", "LyricSky")[:63],
+                        win32gui.NIIF_NOSOUND,
+                    ),
+                )
+            except Exception:
+                pass
+
+    def _on_taskbar_created(self, _hwnd: int, _msg: int, _wparam: int, _lparam: int) -> int:
+        self._tray_added = False
+        self._add_tray_icon(show_balloon=False)
+        self.engine.attach_to_desktop()
+        return 0
+
     def _create_tray_window(self) -> None:
         hinst = win32api.GetModuleHandle(None)
         cls_name = "LyricSkyTrayWindowClass"
+        taskbar_msg = win32gui.RegisterWindowMessage("TaskbarCreated")
 
         wc = win32gui.WNDCLASS()
         wc.hInstance = hinst
         wc.lpszClassName = cls_name
         wc.lpfnWndProc = {
             WM_TRAYICON: self._on_tray_event,
+            taskbar_msg: self._on_taskbar_created,
             win32con.WM_COMMAND: self._on_menu_command,
             win32con.WM_TIMER: self._on_timer,
             win32con.WM_CLOSE: self._on_close,
@@ -671,7 +723,7 @@ class LyricSkyDesktopApp:
         self.tray_hwnd = win32gui.CreateWindow(
             cls_name,
             "LyricSkyTray",
-            0,
+            win32con.WS_OVERLAPPED,
             0,
             0,
             0,
@@ -681,6 +733,7 @@ class LyricSkyDesktopApp:
             hinst,
             None,
         )
+        win32gui.UpdateWindow(self.tray_hwnd)
 
         ico_file = ensure_tray_ico_file(TRAY_ICON_PATH)
         self.hicon = win32gui.LoadImage(
@@ -692,33 +745,7 @@ class LyricSkyDesktopApp:
             win32con.LR_LOADFROMFILE | win32con.LR_DEFAULTSIZE,
         )
 
-        flags = win32gui.NIF_ICON | win32gui.NIF_MESSAGE | win32gui.NIF_TIP
-        tip = self._t("trayTooltip", "LyricSky")[:127]
-        win32gui.Shell_NotifyIcon(
-            win32gui.NIM_ADD,
-            (self.tray_hwnd, 0, flags, WM_TRAYICON, self.hicon, tip),
-        )
-        self._tray_added = True
-
-        # Subtle startup balloon notice in the user's selected language
-        try:
-            win32gui.Shell_NotifyIcon(
-                win32gui.NIM_MODIFY,
-                (
-                    self.tray_hwnd,
-                    0,
-                    win32gui.NIF_INFO,
-                    WM_TRAYICON,
-                    self.hicon,
-                    tip,
-                    self._t("trayStartedMsg", "LyricSky is running.")[:255],
-                    3200,
-                    self._t("trayStartedTitle", "LyricSky")[:63],
-                    win32gui.NIIF_NOSOUND,
-                ),
-            )
-        except Exception:
-            pass
+        self._add_tray_icon(show_balloon=True)
 
         user32.SetTimer(self.tray_hwnd, TIMER_INPUT, 22, None)
         user32.SetTimer(self.tray_hwnd, TIMER_WATCHDOG, 3000, None)
@@ -964,6 +991,16 @@ def main() -> None:
 
     if not app.start():
         log.error("LyricSky could not be started.")
+        if sys.stdout is None:
+            try:
+                user32.MessageBoxW(
+                    0,
+                    f"LyricSky could not start.\nSee log: {LOG_FILE}\n\nTry running Setup.bat first.",
+                    "LyricSky",
+                    0x10,
+                )
+            except Exception:
+                pass
         app.shutdown()
         sys.exit(1)
 

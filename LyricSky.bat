@@ -4,7 +4,9 @@ title LyricSky — Live Lyrics Desktop
 cd /d "%~dp0"
 
 set "PY_EXE=python"
-if exist ".venv\Scripts\python.exe" set "PY_EXE=.venv\Scripts\python.exe"
+if exist ".venv\.ready" (
+    if exist ".venv\Scripts\python.exe" set "PY_EXE=.venv\Scripts\python.exe"
+)
 
 if "%PY_EXE%"=="python" (
     where python >nul 2>&1
