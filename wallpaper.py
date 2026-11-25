@@ -63,18 +63,21 @@ WALLPAPER_URL = f"http://{bridge.HOST}:{bridge.PORT}/?mode=wallpaper"
 CONTROL_URL = f"http://{bridge.HOST}:{bridge.PORT}/"
 STATUS_URL = f"http://{bridge.HOST}:{bridge.PORT}/api/status"
 
-_handlers: list[logging.Handler] = [logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8")]
-if sys.stdout is not None:
-    _handlers.append(logging.StreamHandler(sys.stdout))
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-    handlers=_handlers,
-    force=True,
-)
 log = logging.getLogger("lyricsky.wallpaper")
+
+
+def setup_logging() -> None:
+    """Configure console + data/lyricsky.log file logging when launched directly."""
+    handlers: list[logging.Handler] = [logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8")]
+    if sys.stdout is not None:
+        handlers.append(logging.StreamHandler(sys.stdout))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=handlers,
+        force=True,
+    )
 
 # ============================================================================
 # Win32 Constants & Native Signatures
@@ -146,6 +149,10 @@ user32.ScreenToClient.argtypes = [wt.HWND, ctypes.POINTER(POINT)]
 user32.ScreenToClient.restype = wt.BOOL
 user32.InvalidateRect.argtypes = [wt.HWND, ctypes.c_void_p, wt.BOOL]
 user32.InvalidateRect.restype = wt.BOOL
+user32.SetTimer.argtypes = [wt.HWND, ctypes.c_size_t, wt.UINT, ctypes.c_void_p]
+user32.SetTimer.restype = ctypes.c_size_t
+user32.KillTimer.argtypes = [wt.HWND, ctypes.c_size_t]
+user32.KillTimer.restype = wt.BOOL
 
 
 def cleanup_stale_edge_wallpaper() -> None:
@@ -329,6 +336,26 @@ class DesktopWallpaperEngine:
 
         return "none", progman, 0
 
+    @staticmethod
+    def _snapshot_chrome_windows() -> tuple[set[int], set[int]]:
+        """Capture all existing Chromium/Edge top-level windows and PIDs before launch."""
+        hwnds: set[int] = set()
+        pids: set[int] = set()
+
+        def enum_cb(hwnd: int, _extra: Any) -> bool:
+            try:
+                if win32gui.GetClassName(hwnd) == "Chrome_WidgetWin_1":
+                    hwnds.add(hwnd)
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    if pid:
+                        pids.add(pid)
+            except Exception:
+                pass
+            return True
+
+        win32gui.EnumWindows(enum_cb, None)
+        return hwnds, pids
+
     def launch_renderer(self) -> bool:
         edge_exe = find_msedge_exe()
         if not edge_exe:
@@ -339,6 +366,10 @@ class DesktopWallpaperEngine:
         cleanup_stale_edge_wallpaper()
         self._rect = get_primary_monitor_rect()
         x, y, w, h = self._rect
+
+        # Snapshot every already-open Edge/Chrome window so we NEVER hijack a user's
+        # existing browser tab (e.g. GitHub's RidvanAkiff/LyricSky page!).
+        existing_hwnds, existing_pids = self._snapshot_chrome_windows()
 
         EDGE_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
         cmd = [
@@ -365,43 +396,77 @@ class DesktopWallpaperEngine:
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self.proc = subprocess.Popen(cmd, creationflags=creation_flags)
 
-        target_hwnd = self._wait_for_edge_window(timeout_sec=14.0)
+        target_hwnd = self._wait_for_edge_window(existing_hwnds, existing_pids, timeout_sec=14.0)
         if not target_hwnd:
             log.error("Timed out waiting for Edge wallpaper window.")
             return False
 
         self.hwnd = target_hwnd
         _, self.edge_pid = win32process.GetWindowThreadProcessId(self.hwnd)
-        log.info("Wallpaper window acquired: %s (PID=%d)", hex(self.hwnd), self.edge_pid)
+        title = win32gui.GetWindowText(self.hwnd) or ""
+        rect = win32gui.GetWindowRect(self.hwnd)
+        log.info(
+            "Wallpaper window acquired: %s (PID=%d, root_pid=%d, title=%r, rect=%s)",
+            hex(self.hwnd),
+            self.edge_pid,
+            self.proc.pid if self.proc else -1,
+            title,
+            rect,
+        )
         return self.attach_to_desktop()
 
-    def _wait_for_edge_window(self, timeout_sec: float = 14.0) -> int:
-        deadline = time.monotonic() + timeout_sec
+    def _wait_for_edge_window(
+        self,
+        existing_hwnds: set[int],
+        existing_pids: set[int],
+        timeout_sec: float = 14.0,
+    ) -> int:
+        start = time.monotonic()
+        deadline = start + timeout_sec
         root_pid = self.proc.pid if self.proc else -1
+        fallback_hwnd = 0
 
         while time.monotonic() < deadline:
             candidates: list[tuple[int, int]] = []
 
             def enum_cb(hwnd: int, _extra: Any) -> bool:
-                if not win32gui.IsWindowVisible(hwnd):
+                nonlocal fallback_hwnd
+                if hwnd in existing_hwnds:
                     return True
-                if win32gui.GetClassName(hwnd) != "Chrome_WidgetWin_1":
+                try:
+                    if not win32gui.IsWindowVisible(hwnd):
+                        return True
+                    if win32gui.GetClassName(hwnd) != "Chrome_WidgetWin_1":
+                        return True
+                    l, t, r, b = win32gui.GetWindowRect(hwnd)
+                    if (r - l) < 400 or (b - t) < 300:
+                        return True
+                    title = win32gui.GetWindowText(hwnd) or ""
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                except Exception:
                     return True
-                title = win32gui.GetWindowText(hwnd) or ""
-                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+
+                # Strictly ignore any pre-existing Edge/Chrome browser process
+                if pid in existing_pids:
+                    return True
+
                 if "LyricSky" in title:
                     score = 100 if pid == root_pid else 85
                     candidates.append((score, hwnd))
-                elif pid == root_pid and title:
-                    candidates.append((50, hwnd))
+                elif pid == root_pid:
+                    fallback_hwnd = hwnd
                 return True
 
             win32gui.EnumWindows(enum_cb, None)
             if candidates:
                 candidates.sort(key=lambda item: item[0], reverse=True)
                 return candidates[0][1]
+            # If our own newly launched root_pid window is already open and visible,
+            # allow up to 4.5s for the page title to load, then use it directly.
+            if fallback_hwnd and (time.monotonic() - start) >= 4.5 and win32gui.IsWindow(fallback_hwnd):
+                return fallback_hwnd
             time.sleep(0.15)
-        return 0
+        return fallback_hwnd if (fallback_hwnd and win32gui.IsWindow(fallback_hwnd)) else 0
 
     def _find_render_child(self) -> int:
         if not self.hwnd or not win32gui.IsWindow(self.hwnd):
@@ -421,6 +486,75 @@ class DesktopWallpaperEngine:
             pass
         self.render_hwnd = found or self.hwnd
         return self.render_hwnd
+
+    def _measure_chrome_insets(self) -> tuple[int, int, int, int]:
+        """Measure any residual Edge --app frame (left, top, right, bottom) around Chrome_RenderWidgetHostHWND."""
+        render_ch = self._find_render_child()
+        if not render_ch or render_ch == self.hwnd:
+            return 0, 0, 0, 0
+        try:
+            w_l, w_t, w_r, w_b = win32gui.GetWindowRect(self.hwnd)
+            r_l, r_t, r_r, r_b = win32gui.GetWindowRect(render_ch)
+            left = r_l - w_l if 0 <= (r_l - w_l) <= 30 else 0
+            top = r_t - w_t if 0 <= (r_t - w_t) <= 80 else 0
+            right = w_r - r_r if 0 <= (w_r - r_r) <= 30 else 0
+            bottom = w_b - r_b if 0 <= (w_b - r_b) <= 30 else 0
+            return left, top, right, bottom
+        except Exception:
+            return 0, 0, 0, 0
+
+    def _position_embedded_window(self) -> tuple[int, int, int, int]:
+        """Position self.hwnd inside parent_hwnd so the inner web viewport fills (0, 0, w, h) seamlessly."""
+        x, y, w, h = self._rect
+        pt = POINT(x, y)
+        user32.ScreenToClient(self.parent_hwnd, ctypes.byref(pt))
+
+        in_l, in_t, in_r, in_b = self._measure_chrome_insets()
+        pos_x = pt.x - in_l
+        pos_y = pt.y - in_t
+        pos_w = w + in_l + in_r
+        pos_h = h + in_t + in_b
+
+        if self.embed_mode == "win11_24h2":
+            insert_after = self.defview_hwnd if self.defview_hwnd else win32con.HWND_BOTTOM
+            win32gui.SetWindowPos(
+                self.hwnd,
+                insert_after,
+                pos_x,
+                pos_y,
+                pos_w,
+                pos_h,
+                win32con.SWP_NOACTIVATE | win32con.SWP_SHOWWINDOW | win32con.SWP_FRAMECHANGED,
+            )
+            child_workerw = win32gui.FindWindowEx(self.parent_hwnd, 0, "WorkerW", None)
+            self.child_workerw_hwnd = child_workerw
+            if child_workerw and child_workerw != self.hwnd:
+                try:
+                    win32gui.SetWindowPos(
+                        child_workerw,
+                        self.hwnd,
+                        0,
+                        0,
+                        0,
+                        0,
+                        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
+                    )
+                except Exception:
+                    pass
+        else:
+            win32gui.SetWindowPos(
+                self.hwnd,
+                0,
+                pos_x,
+                pos_y,
+                pos_w,
+                pos_h,
+                win32con.SWP_NOZORDER
+                | win32con.SWP_NOACTIVATE
+                | win32con.SWP_SHOWWINDOW
+                | win32con.SWP_FRAMECHANGED,
+            )
+        return in_l, in_t, in_r, in_b
 
     def attach_to_desktop(self) -> bool:
         if not self.hwnd or not win32gui.IsWindow(self.hwnd):
@@ -461,75 +595,23 @@ class DesktopWallpaperEngine:
         )
         ex_style = (ex_style & ~strip_ex) | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
 
-        top_crop = 0
-        render_ch = self._find_render_child()
-        if render_ch and render_ch != self.hwnd:
-            try:
-                w_rect = win32gui.GetWindowRect(self.hwnd)
-                r_rect = win32gui.GetWindowRect(render_ch)
-                diff = r_rect[1] - w_rect[1]
-                if 0 < diff <= 80:
-                    top_crop = diff
-            except Exception:
-                top_crop = 0
-
         if mode == "win11_24h2":
             ex_style |= WS_EX_LAYERED
             win32gui.SetWindowLong(self.hwnd, win32con.GWL_EXSTYLE, ex_style)
             user32.SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA)
             win32gui.SetParent(self.hwnd, parent_hwnd)
             user32.SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA)
-
-            pt = POINT(x, y)
-            user32.ScreenToClient(parent_hwnd, ctypes.byref(pt))
-
-            insert_after = defview_hwnd if defview_hwnd else win32con.HWND_BOTTOM
-            win32gui.SetWindowPos(
-                self.hwnd,
-                insert_after,
-                pt.x,
-                pt.y - top_crop,
-                w,
-                h + top_crop,
-                win32con.SWP_NOACTIVATE | win32con.SWP_SHOWWINDOW | win32con.SWP_FRAMECHANGED,
-            )
-
-            child_workerw = win32gui.FindWindowEx(parent_hwnd, 0, "WorkerW", None)
-            self.child_workerw_hwnd = child_workerw
-            if child_workerw and child_workerw != self.hwnd:
-                try:
-                    win32gui.SetWindowPos(
-                        child_workerw,
-                        self.hwnd,
-                        0,
-                        0,
-                        0,
-                        0,
-                        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
-                    )
-                except Exception:
-                    pass
         else:
             win32gui.SetWindowLong(self.hwnd, win32con.GWL_EXSTYLE, ex_style)
             win32gui.SetParent(self.hwnd, parent_hwnd)
 
-            pt = POINT(x, y)
-            user32.ScreenToClient(parent_hwnd, ctypes.byref(pt))
-            win32gui.SetWindowPos(
-                self.hwnd,
-                0,
-                pt.x,
-                pt.y - top_crop,
-                w,
-                h + top_crop,
-                win32con.SWP_NOZORDER
-                | win32con.SWP_NOACTIVATE
-                | win32con.SWP_SHOWWINDOW
-                | win32con.SWP_FRAMECHANGED,
-            )
+        # First positioning pass, then let Edge settle layout & re-measure any residual frame
+        self._position_embedded_window()
+        time.sleep(0.28)
+        insets = self._position_embedded_window()
 
         self._find_render_child()
-        log.info("Attached frameless wallpaper [%s] (%dx%d, top_crop=%dpx).", mode, w, h, top_crop)
+        log.info("Attached frameless wallpaper [%s] (%dx%d, insets=%s).", mode, w, h, insets)
         return True
 
     def ensure_attached(self) -> None:
@@ -541,6 +623,18 @@ class DesktopWallpaperEngine:
             log.info("Desktop layout changed — re-aligning...")
             self.attach_to_desktop()
             return
+
+        # Re-crop if Edge changed its inner chrome height after settling
+        render_ch = self._find_render_child()
+        if render_ch and render_ch != self.hwnd:
+            try:
+                rl, rt, rr, rb = win32gui.GetWindowRect(render_ch)
+                x, y, w, h = self._rect
+                if abs(rl - x) > 2 or abs(rt - y) > 2 or abs((rr - rl) - w) > 4 or abs((rb - rt) - h) > 4:
+                    self._position_embedded_window()
+            except Exception:
+                pass
+
         if self.embed_mode == "win11_24h2" and self.defview_hwnd and win32gui.IsWindow(self.defview_hwnd):
             next_after_defview = win32gui.GetWindow(self.defview_hwnd, win32con.GW_HWNDNEXT)
             if next_after_defview != self.hwnd:
@@ -973,6 +1067,7 @@ class LyricSkyDesktopApp:
 
 
 def main() -> None:
+    setup_logging()
     app = LyricSkyDesktopApp()
     atexit.register(app.shutdown)
 
