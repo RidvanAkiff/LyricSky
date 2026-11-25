@@ -51,10 +51,14 @@
   const btnSettings = $("btn-settings");
   const btnCloseSettings = $("btn-close-settings");
   const settingsPanel = $("settings-panel");
+  const settingsBody = settingsPanel ? settingsPanel.querySelector(".settings-body") : null;
   const settingsConnLabel = $("settings-conn-label");
   const btnOffsetReset = $("btn-offset-reset");
   const btnRefetch = $("btn-refetch");
-  const langSelect = $("lang-select");
+  const langDropdown = $("lang-dropdown");
+  const langTrigger = $("lang-trigger");
+  const langTriggerLabel = $("lang-trigger-label");
+  const langMenu = $("lang-menu");
   const sessionSelect = $("session-select");
 
   const optSpotifyCard = $("opt-spotifycard");
@@ -129,7 +133,7 @@
     connDemo: "Preview mode active",
     connBridgeDemo: "Bridge connected (Preview active)",
     close: "Close",
-    languageLabel: "Language",
+    languageLabel: "UI Language",
     themeLabel: "Atmosphere Theme",
     sourceAuto: "Automatic (Spotify priority)",
     sourcePlayingTag: "Playing",
@@ -186,18 +190,36 @@
     return str;
   }
 
+  function setLangMenuOpen(open) {
+    if (!langMenu || !langTrigger) return;
+    langMenu.hidden = !open;
+    langTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
   function populateLanguageSelect() {
-    if (!langSelect) return;
+    if (!langMenu) return;
     const codes = Object.keys(localesMap);
-    langSelect.innerHTML = "";
+    langMenu.innerHTML = "";
     for (const code of codes) {
-      const opt = document.createElement("option");
-      opt.value = code;
-      opt.textContent = localesMap[code].name || code.toUpperCase();
-      langSelect.appendChild(opt);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "lang-option";
+      btn.dataset.lang = code;
+      btn.setAttribute("role", "option");
+      btn.textContent = localesMap[code].name || code.toUpperCase();
+      btn.classList.toggle("active", code === settings.language);
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const chosen = localesMap[code]?.name || code.toUpperCase();
+        setLangMenuOpen(false);
+        updateSettings({ language: code });
+        showNotice(chosen);
+      });
+      langMenu.appendChild(btn);
     }
-    if (localesMap[settings.language]) {
-      langSelect.value = settings.language;
+    if (langTriggerLabel) {
+      const curPack = getLangPack();
+      langTriggerLabel.textContent = curPack.name || (settings.language || "en").toUpperCase();
     }
   }
 
@@ -218,8 +240,13 @@
     });
 
     demoCtaLabel.textContent = isDemoMode ? t("demoStop") : t("demoStart");
-    if (langSelect && localesMap[langCode]) {
-      langSelect.value = langCode;
+    if (langTriggerLabel) {
+      langTriggerLabel.textContent = pack.name || langCode.toUpperCase();
+    }
+    if (langMenu) {
+      langMenu.querySelectorAll(".lang-option").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.lang === langCode);
+      });
     }
 
     updateClock();
@@ -325,9 +352,10 @@
     );
 
   const DEMO_TRACK = {
-    track_id: "LyricSky Studio - Cloudline (Demo)",
-    title: "Cloudline (Preview)",
+    track_id: "LyricSky Studio - Cloudline",
+    title: "Cloudline",
     artist: "LyricSky Studio",
+    album: "Midnight Sky",
     source_name: "Demo",
     cover: DEMO_COVER_SVG,
     accent: "#b9d4f8",
@@ -337,9 +365,9 @@
       { time: 4.5, end: 8.6, text: "Every quiet syllable turns into silver starlight" },
       { time: 9.1, end: 13.4, text: "Cold air on the window while the city fades away" },
       { time: 13.9, end: 18.2, text: "Tracing constellations in the static of the sky" },
-      { time: 19.6, end: 23.8, text: "Bulutların arasından süzülen sessiz bir gece" },
-      { time: 24.3, end: 28.6, text: "Her kelime gökyüzünde ince bir yıldıza dönüşür" },
-      { time: 29.2, end: 33.6, text: "Hold the moment steady before the winter wind arrives" },
+      { time: 19.6, end: 23.8, text: "Soft light falling gently through the winter haze" },
+      { time: 24.3, end: 28.6, text: "Every distant melody lingers in the quiet air" },
+      { time: 29.2, end: 33.6, text: "Hold the moment steady before the morning wind arrives" },
       { time: 34.2, end: 39.4, text: "We are only shadows drawn in light across the dark" },
     ],
   };
@@ -1289,7 +1317,8 @@
       ctx.restore();
     }
 
-    // 6) Advance synced lyrics, side sentence feed & playback UI
+    // 6) Advance smooth desktop wheel scrolling, synced lyrics, side sentence feed & playback UI
+    tickDesktopSmoothScroll(dt);
     tickPlaybackAndLyrics(now, dt);
 
     requestAnimationFrame(render);
@@ -1531,6 +1560,7 @@
     const el = document.createElement("div");
     el.className = "feed-line";
     el.dir = "auto";
+    el.setAttribute("translate", "no");
     el.textContent = ln.text || "";
     el.style.opacity = "0";
     el.dataset.sort = String(sideFeedEpoch * 100000 + lineIdx);
@@ -1963,12 +1993,9 @@
     manualOffsetSec = 0;
 
     clearConstellation();
-    const demoTitle = t("demoTrackTitle");
-    const demoArtist = t("demoTrackArtist");
-    const demoAlbum = t("demoTrackAlbum");
-    trackTitleEl.textContent = demoTitle;
-    trackArtistEl.textContent = demoArtist;
-    updateSpotifyTrackMeta(demoTitle, demoArtist, demoAlbum);
+    trackTitleEl.textContent = DEMO_TRACK.title;
+    trackArtistEl.textContent = DEMO_TRACK.artist;
+    updateSpotifyTrackMeta(DEMO_TRACK.title, DEMO_TRACK.artist, DEMO_TRACK.album);
     updateCoverUI(DEMO_TRACK.cover);
     applyAlbumAccent(DEMO_TRACK.accent);
     buildWordTimeline(DEMO_TRACK.lyrics);
@@ -2310,6 +2337,9 @@
     settingsPanel.hidden = !open;
     document.body.classList.toggle("settings-open", open);
     btnSettings.classList.toggle("active", open);
+    if (!open) {
+      setLangMenuOpen(false);
+    }
     if (open) {
       document.body.classList.remove("dock-faded");
     } else {
@@ -2328,6 +2358,9 @@
   btnCloseSettings.addEventListener("click", () => setSettingsOpen(false));
 
   document.addEventListener("click", (e) => {
+    if (langMenu && !langMenu.hidden && langDropdown && !langDropdown.contains(e.target)) {
+      setLangMenuOpen(false);
+    }
     if (!settingsPanel.hidden && !settingsPanel.contains(e.target) && !playerDock.contains(e.target)) {
       setSettingsOpen(false);
     }
@@ -2364,10 +2397,11 @@
     showNotice(t("refetchNotice"));
   });
 
-  // Language Selector
-  if (langSelect) {
-    langSelect.addEventListener("change", () => {
-      updateSettings({ language: langSelect.value });
+  // UI Language Dropdown Toggle
+  if (langTrigger) {
+    langTrigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setLangMenuOpen(langMenu ? langMenu.hidden : false);
     });
   }
 
@@ -2513,18 +2547,59 @@
   };
 
   // --------------------------------------------------------------------------
-  // Native Desktop Wallpaper Pointer Bridge (0ms WebSocket Click, Hover & Drag)
+  // Native Desktop Wallpaper Pointer Bridge (0ms WebSocket Click, Hover, Drag & Smooth Scroll)
   // --------------------------------------------------------------------------
   let desktopHoveredEl = null;
   let desktopDragRange = null;
   let desktopScrubbing = false;
   let desktopDownPt = null;
+  let desktopDragScroll = null; // { el, mode: 'track'|'drag', startY, startScrollTop, moved }
+  const desktopScrollTargets = new Map(); // scrollable element -> targetScrollTop
 
   function setDesktopHover(el) {
     if (desktopHoveredEl === el) return;
     if (desktopHoveredEl) desktopHoveredEl.classList.remove("desktop-hover");
     desktopHoveredEl = el || null;
     if (desktopHoveredEl) desktopHoveredEl.classList.add("desktop-hover");
+  }
+
+  function findScrollableAt(el) {
+    let cur = el;
+    while (cur && cur !== document.body && cur !== document.documentElement) {
+      if (cur.scrollHeight > cur.clientHeight + 2) {
+        const oy = getComputedStyle(cur).overflowY;
+        if (oy === "auto" || oy === "scroll" || oy === "overlay") {
+          return cur;
+        }
+      }
+      cur = cur.parentElement;
+    }
+    if (
+      settingsBody &&
+      !settingsPanel.hidden &&
+      el &&
+      settingsPanel.contains(el) &&
+      settingsBody.scrollHeight > settingsBody.clientHeight + 2
+    ) {
+      return settingsBody;
+    }
+    return null;
+  }
+
+  function tickDesktopSmoothScroll(dt) {
+    if (desktopScrollTargets.size === 0) return;
+    const factor = 1 - Math.exp(-dt * 20);
+    for (const [el, target] of desktopScrollTargets.entries()) {
+      const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      const clampedTarget = clamp(target, 0, maxTop);
+      const diff = clampedTarget - el.scrollTop;
+      if (Math.abs(diff) < 0.6) {
+        el.scrollTop = clampedTarget;
+        desktopScrollTargets.delete(el);
+      } else {
+        el.scrollTop += diff * factor;
+      }
+    }
   }
 
   function updateRangeFromClientX(rangeEl, clientX) {
@@ -2538,6 +2613,14 @@
     const snapped = Math.round((raw - min) / step) * step + min;
     rangeEl.value = String(clamp(Number(snapped.toFixed(4)), min, max));
     rangeEl.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function scrollFromTrackY(scrollEl, clientY) {
+    const rect = scrollEl.getBoundingClientRect();
+    const ratio = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+    const maxTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
+    desktopScrollTargets.delete(scrollEl);
+    scrollEl.scrollTop = ratio * maxTop;
   }
 
   function handleDesktopPointer(evt) {
@@ -2556,6 +2639,7 @@
         desktopDragRange.dispatchEvent(new Event("change", { bubbles: true }));
         desktopDragRange = null;
       }
+      desktopDragScroll = null;
       desktopDownPt = null;
       return;
     }
@@ -2567,6 +2651,22 @@
     const inDock = !!(el && playerDock.contains(el));
     const inSettings = !!(!settingsPanel.hidden && el && settingsPanel.contains(el));
     const inFeed = !!(el && lyricFeedEl && lyricFeedEl.contains(el));
+
+    if (action === "wheel") {
+      if (inSettings) {
+        resetIdleFade();
+        const scrollable = findScrollableAt(el);
+        if (scrollable) {
+          const deltaY = Number(evt.deltaY) || 0;
+          const maxTop = Math.max(0, scrollable.scrollHeight - scrollable.clientHeight);
+          const curTarget = desktopScrollTargets.has(scrollable)
+            ? desktopScrollTargets.get(scrollable)
+            : scrollable.scrollTop;
+          desktopScrollTargets.set(scrollable, clamp(curTarget + deltaY, 0, maxTop));
+        }
+      }
+      return;
+    }
 
     if (action === "move") {
       if (inDock || inSettings) {
@@ -2584,6 +2684,23 @@
       if (desktopDragRange) {
         updateRangeFromClientX(desktopDragRange, x);
         return;
+      }
+
+      if (desktopDragScroll) {
+        const ds = desktopDragScroll;
+        if (ds.mode === "track") {
+          scrollFromTrackY(ds.el, y);
+          ds.moved = true;
+          return;
+        }
+        const dy = y - ds.startY;
+        if (ds.moved || Math.abs(dy) >= 7) {
+          ds.moved = true;
+          const maxTop = Math.max(0, ds.el.scrollHeight - ds.el.clientHeight);
+          desktopScrollTargets.delete(ds.el);
+          ds.el.scrollTop = clamp(ds.startScrollTop - dy, 0, maxTop);
+          return;
+        }
       }
 
       // Hover progress bar preview
@@ -2604,6 +2721,7 @@
 
     if (action === "down") {
       desktopDownPt = { x, y };
+      desktopDragScroll = null;
       if (inDock || inSettings) resetIdleFade();
 
       // Drag-scrub song progress bar directly from desktop
@@ -2622,6 +2740,22 @@
         desktopDragRange = el;
         updateRangeFromClientX(el, x);
         return;
+      }
+
+      // Support scrollbar click/drag AND vertical drag-to-scroll inside scrollable Settings body
+      if (inSettings) {
+        const scrollable = findScrollableAt(el);
+        if (scrollable) {
+          const sRect = scrollable.getBoundingClientRect();
+          const onRightEdge = !document.body.classList.contains("is-rtl") && x >= sRect.right - 16;
+          const onLeftEdge = document.body.classList.contains("is-rtl") && x <= sRect.left + 16;
+          if (onRightEdge || onLeftEdge) {
+            desktopDragScroll = { el: scrollable, mode: "track", startY: y, startScrollTop: scrollable.scrollTop, moved: true };
+            scrollFromTrackY(scrollable, y);
+            return;
+          }
+          desktopDragScroll = { el: scrollable, mode: "drag", startY: y, startScrollTop: scrollable.scrollTop, moved: false };
+        }
       }
       return;
     }
@@ -2643,17 +2777,27 @@
         return;
       }
 
+      if (desktopDragScroll && desktopDragScroll.moved) {
+        desktopDragScroll = null;
+        desktopDownPt = null;
+        return;
+      }
+      desktopDragScroll = null;
+
       // Ignore long drags (such as desktop icon marquee selection)
       const movedDist = desktopDownPt ? Math.hypot(x - desktopDownPt.x, y - desktopDownPt.y) : 0;
       desktopDownPt = null;
       if (movedDist > 20) return;
 
       if (inDock || inSettings || inFeed) {
+        if (langMenu && !langMenu.hidden && langDropdown && !langDropdown.contains(el)) {
+          setLangMenuOpen(false);
+        }
         if (el.tagName === "SELECT" && el.options.length > 0) {
           el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
           el.dispatchEvent(new Event("change", { bubbles: true }));
           const chosen = el.options[el.selectedIndex].textContent;
-          showNotice(el.id === "lang-select" ? chosen : t("sourceNotice", { name: chosen }));
+          showNotice(t("sourceNotice", { name: chosen }));
           return;
         }
         const clickable = el.closest("button, label.toggle-item, .feed-line, .time-toggle");

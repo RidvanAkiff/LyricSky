@@ -100,6 +100,8 @@ WS_EX_NOREDIRECTIONBITMAP = 0x00200000
 WM_TRAYICON = win32con.WM_USER + 20
 WM_QUERYENDSESSION = 0x0011
 WM_ENDSESSION = 0x0016
+WH_MOUSE_LL = 14
+WM_MOUSEWHEEL = 0x020A
 
 TIMER_INPUT = 1
 TIMER_WATCHDOG = 2
@@ -141,6 +143,18 @@ class POINT(ctypes.Structure):
     _fields_ = [("x", wt.LONG), ("y", wt.LONG)]
 
 
+class MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("pt", POINT),
+        ("mouseData", wt.DWORD),
+        ("flags", wt.DWORD),
+        ("time", wt.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+LOWLEVELMOUSEPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wt.WPARAM, wt.LPARAM)
+
 user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
 user32.GetCursorPos.restype = wt.BOOL
 user32.WindowFromPoint.argtypes = [POINT]
@@ -153,6 +167,12 @@ user32.SetTimer.argtypes = [wt.HWND, ctypes.c_size_t, wt.UINT, ctypes.c_void_p]
 user32.SetTimer.restype = ctypes.c_size_t
 user32.KillTimer.argtypes = [wt.HWND, ctypes.c_size_t]
 user32.KillTimer.restype = wt.BOOL
+user32.SetWindowsHookExW.argtypes = [ctypes.c_int, LOWLEVELMOUSEPROC, wt.HINSTANCE, wt.DWORD]
+user32.SetWindowsHookExW.restype = wt.HHOOK
+user32.UnhookWindowsHookEx.argtypes = [wt.HHOOK]
+user32.UnhookWindowsHookEx.restype = wt.BOOL
+user32.CallNextHookEx.argtypes = [wt.HHOOK, ctypes.c_int, wt.WPARAM, wt.LPARAM]
+user32.CallNextHookEx.restype = ctypes.c_ssize_t
 
 
 def cleanup_stale_edge_wallpaper() -> None:
@@ -388,7 +408,7 @@ class DesktopWallpaperEngine:
             "--disable-background-timer-throttling",
             "--disable-renderer-backgrounding",
             "--disable-backgrounding-occluded-windows",
-            "--disable-features=CalculateNativeWinOcclusion,OverscrollHistoryNavigation,msEdgeSidebarV2",
+            "--disable-features=CalculateNativeWinOcclusion,OverscrollHistoryNavigation,msEdgeSidebarV2,Translate",
             "--hide-scrollbars",
         ]
 
@@ -735,6 +755,9 @@ class LyricSkyDesktopApp:
         self.tray_hwnd: int = 0
         self.hicon: int = 0
         self._tray_added = False
+        self._mouse_hook: Any = None
+        self._mouse_hook_proc: Any = None
+        self._pending_wheels: list[tuple[int, int, int]] = []
 
     def _lang(self) -> str:
         return str(self.bridge_thread.bridge_svc.settings.data.get("language", "en"))
@@ -840,10 +863,45 @@ class LyricSkyDesktopApp:
         )
 
         self._add_tray_icon(show_balloon=True)
+        self._install_wheel_hook()
 
         user32.SetTimer(self.tray_hwnd, TIMER_INPUT, 22, None)
         user32.SetTimer(self.tray_hwnd, TIMER_WATCHDOG, 3000, None)
         user32.SetTimer(self.tray_hwnd, TIMER_STATUS, 1800, None)
+
+    def _install_wheel_hook(self) -> None:
+        """Install an ultra-lightweight WH_MOUSE_LL observer for desktop scroll-wheel events."""
+        if self._mouse_hook:
+            return
+
+        def _proc(n_code: int, wparam: int, lparam: int) -> int:
+            if n_code >= 0 and wparam == WM_MOUSEWHEEL and self.desktop_click_enabled:
+                try:
+                    info = ctypes.cast(lparam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+                    delta = ctypes.c_short((info.mouseData >> 16) & 0xFFFF).value
+                    if delta:
+                        self._pending_wheels.append((info.pt.x, info.pt.y, int(delta)))
+                        if len(self._pending_wheels) > 64:
+                            del self._pending_wheels[:-32]
+                except Exception:
+                    pass
+            return int(user32.CallNextHookEx(self._mouse_hook or 0, n_code, wparam, lparam))
+
+        self._mouse_hook_proc = LOWLEVELMOUSEPROC(_proc)
+        hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self._mouse_hook_proc, 0, 0)
+        if hook:
+            self._mouse_hook = hook
+        else:
+            log.debug("WH_MOUSE_LL wheel hook could not be installed.")
+
+    def _remove_wheel_hook(self) -> None:
+        if self._mouse_hook:
+            try:
+                user32.UnhookWindowsHookEx(self._mouse_hook)
+            except Exception:
+                pass
+            self._mouse_hook = None
+            self._mouse_hook_proc = None
 
     def _on_tray_event(self, _hwnd: int, _msg: int, _wparam: int, lparam: int) -> int:
         if lparam == win32con.WM_LBUTTONDBLCLK:
@@ -945,7 +1003,29 @@ class LyricSkyDesktopApp:
 
     def _tick_desktop_input(self) -> None:
         if not self.desktop_click_enabled:
+            self._pending_wheels.clear()
             return
+
+        # 1) Drain queued scroll-wheel ticks first (forwards ONLY when cursor is on Desktop)
+        if self._pending_wheels:
+            events = self._pending_wheels[:]
+            self._pending_wheels.clear()
+            wx, wy, _ = events[-1]
+            total_delta = sum(ev[2] for ev in events)
+            if total_delta:
+                on_desk_w, wnx, wny = self.engine.read_desktop_pointer(wx, wy)
+                if on_desk_w:
+                    # Standard Windows wheel notch = +120 (up) / -120 (down) -> ~84px smooth scroll
+                    self._broadcast(
+                        {
+                            "type": "desktop_pointer",
+                            "action": "wheel",
+                            "nx": round(wnx, 5),
+                            "ny": round(wny, 5),
+                            "deltaY": round(-total_delta * 0.72, 1),
+                        }
+                    )
+
         pt = POINT()
         if not user32.GetCursorPos(ctypes.byref(pt)):
             return
@@ -1045,6 +1125,7 @@ class LyricSkyDesktopApp:
             return
         self._shutting_down = True
         log.info("Shutting down LyricSky and restoring original Windows wallpaper...")
+        self._remove_wheel_hook()
         if self.tray_hwnd and win32gui.IsWindow(self.tray_hwnd):
             for tid in (TIMER_INPUT, TIMER_WATCHDOG, TIMER_STATUS):
                 try:

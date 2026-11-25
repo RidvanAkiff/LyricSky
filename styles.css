@@ -930,15 +930,26 @@ body.compact-dock .compact-progress {
   gap: 10px;
   max-height: min(calc(100vh - 340px), 520px);
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .settings-body::-webkit-scrollbar {
-  width: 5px;
+  width: 6px;
+}
+
+.settings-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 999px;
 }
 
 .settings-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.24);
   border-radius: 999px;
+}
+
+.settings-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.42);
 }
 
 .setting-block {
@@ -1068,6 +1079,97 @@ body.compact-dock .compact-progress {
 .glass-select option {
   background: #14171f;
   color: #fff;
+}
+
+/* Custom In-Panel UI Language Dropdown (Works Natively on Desktop Wallpaper & Browser) */
+.lang-dropdown {
+  position: relative;
+}
+
+.lang-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.lang-trigger:hover,
+.lang-trigger.desktop-hover,
+.lang-trigger[aria-expanded="true"] {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.42);
+}
+
+.lang-trigger > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lang-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.72;
+  transition: transform 0.18s ease;
+}
+
+.lang-trigger[aria-expanded="true"] .lang-chevron {
+  transform: rotate(180deg);
+}
+
+.lang-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 284px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(14, 17, 24, 0.96);
+  backdrop-filter: blur(28px) saturate(155%);
+  -webkit-backdrop-filter: blur(28px) saturate(155%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.65);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  z-index: 40;
+}
+
+.lang-menu[hidden] {
+  display: none;
+}
+
+.lang-option {
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.73rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.lang-option:hover,
+.lang-option.desktop-hover {
+  background: rgba(255, 255, 255, 0.11);
+  color: #ffffff;
+}
+
+.lang-option.active {
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  color: #ffffff;
+  font-weight: 600;
 }
 
 .segmented {
@@ -1613,14 +1715,23 @@ body.hide-sidefeed #lyric-feed {
 }
 
 /* ==========================================================================
-   RTL Language Support (Arabic) — Text Flows RTL While Media Controls Stay LTR
+   RTL Language Support (Arabic) — UI Labels Flow RTL While Song Titles, Lyrics & Controls Stay Untouched
    ========================================================================== */
 
 body.is-rtl #settings-panel,
-body.is-rtl .dock-header,
 body.is-rtl .sp-top-bar,
-body.is-rtl .sp-info {
+body.is-rtl .status-row {
   direction: rtl;
+}
+
+body.is-rtl .lang-trigger,
+body.is-rtl .lang-option {
+  text-align: right;
+}
+
+body.is-rtl .lang-menu {
+  left: auto;
+  right: 0;
 }
 
 body.is-rtl .scrubber-section,

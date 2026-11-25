@@ -1011,7 +1011,7 @@ def set_desktop_icons_visible(visible: bool | None = None) -> bool:
 
 def friendly_app_name(app_id: str | None) -> str:
     if not app_id:
-        return "Medya"
+        return "Media"
     low = app_id.lower()
     mapping = [
         ("spotify", "Spotify"),
@@ -1032,8 +1032,8 @@ def friendly_app_name(app_id: str | None) -> str:
         ("brave", "Brave"),
         ("opera", "Opera"),
         ("vivaldi", "Vivaldi"),
-        ("zunemusic", "Medya Oynatıcı"),
-        ("microsoft.media", "Medya Oynatıcı"),
+        ("zunemusic", "Media Player"),
+        ("microsoft.media", "Media Player"),
     ]
     for needle, label in mapping:
         if needle in low:
@@ -1041,7 +1041,7 @@ def friendly_app_name(app_id: str | None) -> str:
     # Strip UWP package noise or .exe
     cleaned = app_id.split("!")[-1].replace(".exe", "").replace(".EXE", "")
     cleaned = cleaned.split("_")[0].split(".")[-1]
-    return cleaned[:20] or "Medya"
+    return cleaned[:20] or "Media"
 
 
 # ============================================================================

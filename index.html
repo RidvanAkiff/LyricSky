@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" translate="no" class="notranslate">
 <head>
   <meta charset="UTF-8" />
+  <meta name="google" content="notranslate" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LyricSky — Live Lyrics Desktop</title>
   <link rel="stylesheet" href="styles.css" />
@@ -50,15 +51,21 @@
       </div>
 
       <div class="settings-body">
-        <!-- Language & Media Source Row -->
+        <!-- UI Language & Media Source Row -->
         <div class="select-two-col">
           <div class="setting-block">
             <div class="setting-label-row">
-              <span class="setting-label" data-i18n="languageLabel">Language</span>
+              <span class="setting-label" data-i18n="languageLabel">UI Language</span>
             </div>
-            <select id="lang-select" class="glass-select" aria-label="Language">
-              <option value="en">English</option>
-            </select>
+            <div class="lang-dropdown" id="lang-dropdown">
+              <button type="button" id="lang-trigger" class="glass-select lang-trigger" aria-haspopup="listbox" aria-expanded="false">
+                <span id="lang-trigger-label">English</span>
+                <svg class="lang-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6"/>
+                </svg>
+              </button>
+              <div id="lang-menu" class="lang-menu" role="listbox" hidden></div>
+            </div>
           </div>
           <div class="setting-block">
             <div class="setting-label-row">
@@ -204,7 +211,7 @@
     </section>
 
     <!-- Subtle Full-Line Lyric Whisper -->
-    <div id="lyric-whisper" dir="auto" aria-live="off"></div>
+    <div id="lyric-whisper" dir="auto" translate="no" aria-live="off"></div>
 
     <!-- Floating Glassmorphic Media Dock -->
     <main id="player-dock" aria-label="Media Player">
@@ -227,9 +234,9 @@
         <!-- Track Title, Artist & Live Status -->
         <div class="track-meta">
           <div class="track-title-row">
-            <div id="track-title" dir="auto">Waiting for connection...</div>
+            <div id="track-title" dir="auto" translate="no">Waiting for connection...</div>
           </div>
-          <div id="track-artist" dir="auto">Syncs automatically when a song starts</div>
+          <div id="track-artist" dir="auto" translate="no">Syncs automatically when a song starts</div>
           <div class="status-row">
             <span class="status-dot" id="status-dot"></span>
             <span id="status-text">Bridge offline</span>
@@ -349,15 +356,15 @@
 
     <div class="sp-info">
       <div class="sp-title-row">
-        <div class="sp-title" id="sp-title" dir="auto">Waiting for Spotify</div>
+        <div class="sp-title" id="sp-title" dir="auto" translate="no">Waiting for Spotify</div>
         <span class="sp-check" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2a10 10 0 1 0 10 10A10.011 10.011 0 0 0 12 2zm4.71 7.71-5.4 5.4a1 1 0 0 1-1.42 0l-2.6-2.6a1 1 0 1 1 1.42-1.42l1.89 1.9 4.69-4.7a1 1 0 1 1 1.42 1.42z"/>
           </svg>
         </span>
       </div>
-      <div class="sp-artist" id="sp-artist" dir="auto">Your current track will appear here</div>
-      <div class="sp-album" id="sp-album" dir="auto" hidden></div>
+      <div class="sp-artist" id="sp-artist" dir="auto" translate="no">Your current track will appear here</div>
+      <div class="sp-album" id="sp-album" dir="auto" translate="no" hidden></div>
     </div>
 
     <div class="sp-progress-wrap">
@@ -372,8 +379,8 @@
   </aside>
 
   <!-- Layer 4B: Bottom-Right Spotify-Style Scrolling Sentence Feed -->
-  <aside id="lyric-feed" aria-label="Lyrics Stream">
-    <div id="lyric-feed-list"></div>
+  <aside id="lyric-feed" translate="no" aria-label="Lyrics Stream">
+    <div id="lyric-feed-list" translate="no"></div>
   </aside>
 
   <script src="app.js" defer></script>

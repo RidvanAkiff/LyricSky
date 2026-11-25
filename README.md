@@ -14,8 +14,8 @@ A standalone, zero-bloat **Windows 10 & Windows 11 (including 24H2/25H2)** live 
   - **Bottom-Left:** Translucent Spotify Now-Playing screen card with high-res album artwork & live equalizer.
   - **Bottom-Center:** Interactive frosted glass media dock (clickable & draggable right from the desktop!) with expandable settings, 4 atmosphere themes (*Overcast*, *Midnight*, *Ambient*, *Dusk*), lyric sync offset, and one-click **Desktop Icons Show/Hide** (preserves exact icon layout!).
   - **Bottom-Right:** Spotify-style sentence-by-sentence lyric feed that smoothly fades over time (click any line to seek).
-- **12 Built-in UI Languages (with Setup Wizard & RTL Support):**
-  English, Türkçe, Deutsch, Español, Français, Português, Italiano, Русский, 日本語, 한국어, 简体中文, العربية.
+- **12 Built-in UI Languages (Interface Only — Songs & Lyrics Stay Original):**
+  English, Türkçe, Deutsch, Español, Français, Português, Italiano, Русский, 日本語, 한국어, 简体中文, العربية. Changing the language only translates the LyricSky interface (setup wizard, settings, status badges, system tray); song titles, artist names, and synced lyrics always remain untouched in their original language.
 
 ---
 
