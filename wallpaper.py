@@ -56,6 +56,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 EDGE_PROFILE_DIR = DATA_DIR / "edge_lyricsky_profile"
+EDGE_PID_FILE = DATA_DIR / "edge.pid"
 TRAY_ICON_PATH = DATA_DIR / "lyricsky_tray.ico"
 LOG_FILE = DATA_DIR / "lyricsky.log"
 
@@ -84,12 +85,18 @@ def setup_logging() -> None:
 # ============================================================================
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
 
 SMTO_NORMAL = 0x0000
 LWA_ALPHA = 0x00000002
 GA_ROOT = 2
-SPI_SETDESKWALLPAPER = 0x0014
-SPIF_SENDCHANGE = 0x0002
+RDW_INVALIDATE = 0x0001
+RDW_ERASE = 0x0004
+RDW_ALLCHILDREN = 0x0080
+RDW_UPDATENOW = 0x0100
+ERROR_ALREADY_EXISTS = 183
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+PROCESS_TERMINATE = 0x0001
 
 WS_EX_NOACTIVATE = 0x08000000
 WS_EX_LAYERED = 0x00080000
@@ -135,8 +142,20 @@ user32.GetAncestor.argtypes = [wt.HWND, wt.UINT]
 user32.GetAncestor.restype = wt.HWND
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
-user32.SystemParametersInfoW.argtypes = [wt.UINT, wt.UINT, ctypes.c_void_p, wt.UINT]
-user32.SystemParametersInfoW.restype = wt.BOOL
+user32.RedrawWindow.argtypes = [wt.HWND, ctypes.c_void_p, wt.HRGN, wt.UINT]
+user32.RedrawWindow.restype = wt.BOOL
+kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.LPCWSTR]
+kernel32.CreateMutexW.restype = wt.HANDLE
+kernel32.GetLastError.argtypes = []
+kernel32.GetLastError.restype = wt.DWORD
+kernel32.OpenProcess.argtypes = [wt.DWORD, wt.BOOL, wt.DWORD]
+kernel32.OpenProcess.restype = wt.HANDLE
+kernel32.QueryFullProcessImageNameW.argtypes = [wt.HANDLE, wt.DWORD, wt.LPWSTR, ctypes.POINTER(wt.DWORD)]
+kernel32.QueryFullProcessImageNameW.restype = wt.BOOL
+kernel32.TerminateProcess.argtypes = [wt.HANDLE, wt.UINT]
+kernel32.TerminateProcess.restype = wt.BOOL
+kernel32.CloseHandle.argtypes = [wt.HANDLE]
+kernel32.CloseHandle.restype = wt.BOOL
 
 
 class POINT(ctypes.Structure):
@@ -175,8 +194,55 @@ user32.CallNextHookEx.argtypes = [wt.HHOOK, ctypes.c_int, wt.WPARAM, wt.LPARAM]
 user32.CallNextHookEx.restype = ctypes.c_ssize_t
 
 
-def cleanup_stale_edge_wallpaper() -> None:
-    """Terminate only Edge processes started with LyricSky's private profile."""
+def _terminate_edge_pid(pid: int) -> bool:
+    """Safely terminate a process ONLY if it is an msedge.exe instance (<1ms Win32)."""
+    if pid <= 0:
+        return False
+    h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, False, pid)
+    if not h:
+        return False
+    try:
+        buf = ctypes.create_unicode_buffer(512)
+        size = wt.DWORD(512)
+        if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+            if os.path.basename(buf.value).lower() == "msedge.exe":
+                kernel32.TerminateProcess(h, 0)
+                return True
+    except Exception:
+        pass
+    finally:
+        kernel32.CloseHandle(h)
+    return False
+
+
+def _save_edge_pid(pid: int) -> None:
+    try:
+        if pid > 0:
+            EDGE_PID_FILE.write_text(str(pid), encoding="ascii")
+        elif EDGE_PID_FILE.exists():
+            EDGE_PID_FILE.unlink()
+    except Exception:
+        pass
+
+
+def cleanup_stale_edge_wallpaper(allow_powershell_fallback: bool = False) -> None:
+    """Terminate leftover LyricSky Edge processes in <1ms via saved PID file (zero boot delay)."""
+    if EDGE_PID_FILE.exists():
+        try:
+            old_pid = int(EDGE_PID_FILE.read_text(encoding="ascii").strip())
+            _terminate_edge_pid(old_pid)
+        except Exception:
+            pass
+        try:
+            EDGE_PID_FILE.unlink()
+        except Exception:
+            pass
+        if not allow_powershell_fallback:
+            return
+
+    if not allow_powershell_fallback:
+        return
+
     try:
         ps = (
             "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
@@ -196,9 +262,15 @@ def cleanup_stale_edge_wallpaper() -> None:
 
 
 def refresh_windows_wallpaper() -> None:
-    """Force Windows to repaint the user's original static desktop wallpaper."""
+    """Cleanly repaint Windows Progman/WorkerW without altering the user's wallpaper setting."""
     try:
-        user32.SystemParametersInfoW(SPI_SETDESKWALLPAPER, 0, None, SPIF_SENDCHANGE)
+        flags = RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW
+        progman = win32gui.FindWindow("Progman", None)
+        if progman:
+            user32.RedrawWindow(progman, None, 0, flags)
+            workerw = win32gui.FindWindowEx(progman, 0, "WorkerW", None)
+            if workerw:
+                user32.RedrawWindow(workerw, None, 0, flags)
         user32.InvalidateRect(0, None, True)
     except Exception:
         pass
@@ -223,7 +295,9 @@ def find_msedge_exe() -> str | None:
 
 
 def ensure_tray_ico_file(path: Path) -> Path:
-    """Generate a crisp anti-aliased star-reticle multi-size .ico file via Pillow."""
+    """Generate a crisp anti-aliased star-reticle multi-size .ico file via Pillow (cached)."""
+    if path.is_file() and path.stat().st_size > 1000:
+        return path
     size = 256
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -382,8 +456,10 @@ class DesktopWallpaperEngine:
             log.error("Microsoft Edge was not found on this system.")
             return False
 
-        self.stop_renderer()
-        cleanup_stale_edge_wallpaper()
+        if self.hwnd or self.proc or self.edge_pid:
+            self.stop_renderer()
+        else:
+            cleanup_stale_edge_wallpaper(allow_powershell_fallback=False)
         self._rect = get_primary_monitor_rect()
         x, y, w, h = self._rect
 
@@ -423,6 +499,7 @@ class DesktopWallpaperEngine:
 
         self.hwnd = target_hwnd
         _, self.edge_pid = win32process.GetWindowThreadProcessId(self.hwnd)
+        _save_edge_pid(self.edge_pid)
         title = win32gui.GetWindowText(self.hwnd) or ""
         rect = win32gui.GetWindowRect(self.hwnd)
         log.info(
@@ -433,7 +510,7 @@ class DesktopWallpaperEngine:
             title,
             rect,
         )
-        return self.attach_to_desktop()
+        return self.attach_to_desktop(wait_for_desktop_sec=25.0)
 
     def _wait_for_edge_window(
         self,
@@ -576,11 +653,17 @@ class DesktopWallpaperEngine:
             )
         return in_l, in_t, in_r, in_b
 
-    def attach_to_desktop(self) -> bool:
+    def attach_to_desktop(self, wait_for_desktop_sec: float = 2.0) -> bool:
         if not self.hwnd or not win32gui.IsWindow(self.hwnd):
             return False
 
+        # Wait gracefully for Explorer's Progman/SHELLDLL_DefView right after Windows login
+        deadline = time.monotonic() + max(0.0, wait_for_desktop_sec)
         mode, parent_hwnd, defview_hwnd = self._find_desktop_targets()
+        while (mode == "none" or not parent_hwnd) and time.monotonic() < deadline:
+            time.sleep(0.25)
+            mode, parent_hwnd, defview_hwnd = self._find_desktop_targets()
+
         if mode == "none" or not parent_hwnd:
             log.error("Could not locate Windows desktop layer (Progman/WorkerW).")
             return False
@@ -722,17 +805,11 @@ class DesktopWallpaperEngine:
             self.proc = None
 
         if self.edge_pid:
-            try:
-                handle = win32api.OpenProcess(win32con.PROCESS_TERMINATE, False, self.edge_pid)
-                try:
-                    win32process.TerminateProcess(handle, 0)
-                finally:
-                    win32api.CloseHandle(handle)
-            except Exception:
-                pass
+            _terminate_edge_pid(self.edge_pid)
             self.edge_pid = 0
 
-        cleanup_stale_edge_wallpaper()
+        _save_edge_pid(0)
+        cleanup_stale_edge_wallpaper(allow_powershell_fallback=False)
         self.hwnd = 0
         self.render_hwnd = 0
         refresh_windows_wallpaper()
@@ -1105,14 +1182,6 @@ class LyricSkyDesktopApp:
             log.error("Bridge failed to start: %s", self.bridge_thread.error)
             return False
 
-        for _ in range(25):
-            try:
-                with urllib.request.urlopen(STATUS_URL, timeout=1.0) as r:
-                    if r.status == 200:
-                        break
-            except Exception:
-                time.sleep(0.15)
-
         if not self.engine.launch_renderer():
             return False
 
@@ -1149,6 +1218,11 @@ class LyricSkyDesktopApp:
 
 def main() -> None:
     setup_logging()
+    mutex = kernel32.CreateMutexW(None, False, "Local\\LyricSkyWallpaperSingleton")
+    if mutex and kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        log.info("LyricSky is already running — skipping duplicate launch.")
+        kernel32.CloseHandle(mutex)
+        return
     app = LyricSkyDesktopApp()
     atexit.register(app.shutdown)
 

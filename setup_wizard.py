@@ -40,28 +40,50 @@ def save_language_setting(lang_code: str) -> None:
 
 
 def configure_autostart(enable: bool) -> None:
-    if not os.environ.get("APPDATA"):
-        return
+    """Register instant AtLogOn Task Scheduler startup (bypasses Windows Startup folder 2-4 min delay).
+    Falls back to HKCU\\...\\Run if Task Scheduler is restricted. Cleans legacy Startup .lnk.
+    """
+    target = BASE_DIR / "LyricSky.vbs"
+    escaped_target = str(target).replace("'", "''")
+    escaped_dir = str(BASE_DIR).replace("'", "''")
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    # Always remove legacy slow Startup folder shortcut so LyricSky never launches twice
+    try:
+        if os.environ.get("APPDATA") and STARTUP_SHORTCUT.exists():
+            STARTUP_SHORTCUT.unlink()
+    except Exception:
+        pass
+
     try:
         if enable:
-            target = BASE_DIR / "LyricSky.vbs"
             ps = (
-                f"$s=(New-Object -COM WScript.Shell).CreateShortcut('{STARTUP_SHORTCUT}');"
-                f"$s.TargetPath='wscript.exe';"
-                f"$s.Arguments='\"{target}\"';"
-                f"$s.WorkingDirectory='{BASE_DIR}';"
-                f"$s.Description='LyricSky Live Lyrics Desktop Wallpaper';"
-                f"$s.Save()"
+                "$ErrorActionPreference='Stop'; "
+                "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'LyricSky' -ErrorAction SilentlyContinue; "
+                "try { "
+                f"  $act = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument '\"{escaped_target}\"' -WorkingDirectory '{escaped_dir}'; "
+                "  $trig = New-ScheduledTaskTrigger -AtLogOn -User \"$env:USERDOMAIN\\$env:USERNAME\"; "
+                "  $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -Priority 4; "
+                "  Register-ScheduledTask -TaskName 'LyricSky' -Action $act -Trigger $trig -Settings $set -Description 'LyricSky Live Lyrics Desktop Wallpaper' -Force | Out-Null; "
+                "} catch { "
+                f"  Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'LyricSky' -Value 'wscript.exe \"{escaped_target}\"'; "
+                "}"
             )
-            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             subprocess.run(
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
                 creationflags=creation_flags,
                 check=False,
             )
         else:
-            if STARTUP_SHORTCUT.exists():
-                STARTUP_SHORTCUT.unlink()
+            ps = (
+                "Unregister-ScheduledTask -TaskName 'LyricSky' -Confirm:$false -ErrorAction SilentlyContinue; "
+                "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'LyricSky' -ErrorAction SilentlyContinue"
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                creationflags=creation_flags,
+                check=False,
+            )
     except Exception:
         pass
 

@@ -42,7 +42,7 @@ A standalone, zero-bloat **Windows 10 & Windows 11 (including 24H2/25H2)** live 
 | `LyricSky.vbs` | Start live desktop wallpaper silently (no console window) |
 | `LyricSky.bat` | Start live desktop wallpaper with live console logs |
 | `LyricSky_Stop.bat` | Stop LyricSky cleanly & restore your original Windows wallpaper |
-| `install_startup.bat` / `uninstall_startup.bat` | Add or remove Windows Startup autolaunch |
+| `install_startup.bat` / `uninstall_startup.bat` | Register / remove instant Windows login autostart (Task Scheduler) |
 
 - **System Tray (Star Icon):** Right-click the star icon near your Windows clock to Play/Pause, switch themes, toggle desktop icons, open settings, re-align to desktop, or quit cleanly.
 - **Custom Background Video:** Replace `clouds.mp4` with any MP4 video you like — the dual-deck crossfader automatically adapts to its duration!
